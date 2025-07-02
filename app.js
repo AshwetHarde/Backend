@@ -120,6 +120,7 @@ app.get('*', (req, res) => {
   }
 });
 
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ 
@@ -130,10 +131,30 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 CoinGuard Backend Server running on http://localhost:${PORT}`);
-  console.log('📡 Available endpoints:');
-  console.log(' Presale statistics');
-  console.log('   GET  /api/leaderboard - Top investors');
-  console.log('   POST /api/upload - File upload');
-}); 
+// Function to start server
+function startServer(port) {
+  try {
+    const server = app.listen(port, () => {
+      console.log(`🚀 CoinGuard Backend Server running on http://localhost:${port}`);
+      console.log('📡 Available endpoints:');
+      console.log(' Presale statistics');
+      console.log('   GET  /api/leaderboard - Top investors');
+      console.log('   POST /api/upload - File upload');
+    });
+
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.log(`⚠️ Port ${port} is busy, trying ${port + 1}...`);
+        startServer(port + 1);
+      } else {
+        console.error('Server error:', error);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Start the server
+startServer(PORT); 
