@@ -95,3 +95,5 @@ app.get('/',(req,res)=>{
 //   console.log(`🚀 Server running on port ${PORT}`);
 // }); 
 
+
+export default app;
