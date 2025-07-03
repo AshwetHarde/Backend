@@ -89,6 +89,9 @@ app.use((err, req, res, next) => {
 app.get('/',(req,res)=>{
   res.send('welcome.....')
 })
+app.get('/b',(req,res)=>{
+  res.send('2222.....')
+})
 
 // // Start server
 // app.listen(PORT, () => {
