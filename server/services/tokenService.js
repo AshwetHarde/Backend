@@ -14,35 +14,57 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
-// Validate RPC URL
-const rpcUrl = process.env.SOLANA_RPC_URL;
-if (!rpcUrl || !rpcUrl.startsWith('http')) {
-  throw new Error('Invalid or missing SOLANA_RPC_URL in environment variables');
+// RPC Connection setup with fallback URLs
+const RPC_ENDPOINTS = [
+  process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+  'https://rpc.ankr.com/solana'
+];
+
+let connection;
+
+// Try each RPC endpoint until one works
+async function initializeConnection() {
+  for (const endpoint of RPC_ENDPOINTS) {
+    try {
+      const testConnection = new Connection(endpoint, 'confirmed');
+      await testConnection.getLatestBlockhash('confirmed');
+      connection = testConnection;
+      console.log('✅ Connected to Solana RPC:', endpoint);
+      return;
+    } catch (error) {
+      console.warn(`Failed to connect to ${endpoint}:`, error.message);
+      continue;
+    }
+  }
+  throw new Error('Failed to connect to any RPC endpoint');
 }
 
-// RPC Connection setup
-const connection = new Connection(rpcUrl, 'confirmed');
-
-// Token configuration
+// Token configuration matching frontend
 const TOKEN_CONFIG = {
-  CGT_MINT: process.env.CGT_MINT_ADDRESS,
-  TREASURY_PUBLIC_KEY: process.env.CGT_TREASURY_PUBLIC_KEY,
-  TREASURY_PRIVATE_KEY: process.env.CGT_TREASURY_PRIVATE_KEY,
-  DECIMALS: 9,
+  CGT_MINT: process.env.CGT_MINT_ADDRESS || 'HThCz865FsMBh59ECT2Tyyij2WoRpfEXLJkvxjJSmnsE',
+  PAYMENT_RECEIVER: process.env.PAYMENT_RECEIVER_WALLET || '4DZPTePbiBvkEWPgbUM53LszBCEobGxEaFga43gQHNdz',
+  DECIMALS: parseInt(process.env.CGT_DECIMALS || '9'),
   
   // Exchange rates
-  SOL_TO_CGT_RATE: 7500,
-  USDT_TO_CGT_RATE: 50,
-  USDC_TO_CGT_RATE: 50,
+  SOL_TO_CGT_RATE: parseInt(process.env.SOL_TO_CGT_RATE || '7500'),
+  USDT_TO_CGT_RATE: parseInt(process.env.USDT_TO_CGT_RATE || '50'),
+  USDC_TO_CGT_RATE: parseInt(process.env.USDC_TO_CGT_RATE || '50'),
   
   // Stablecoin mints
-  USDT_MINT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
-  USDC_MINT: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  USDT_MINT: process.env.USDT_MINT_ADDRESS || 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  USDC_MINT: process.env.USDC_MINT_ADDRESS || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   
-  // Presale timing
-  PRESALE_START: process.env.PRESALE_START || 1750819200000,
-  PRESALE_END: process.env.PRESALE_END || 1756166400000,
+  // Presale timing (convert dates to timestamps)
+  PRESALE_START: Date.parse('2025-06-25T00:00:00Z'),
+  PRESALE_END: Date.parse('2025-08-25T00:00:00Z'),
+  
+  // Treasury keys (required for secure operations)
+  TREASURY_PUBLIC_KEY: process.env.CGT_TREASURY_PUBLIC_KEY,
+  TREASURY_PRIVATE_KEY: process.env.CGT_TREASURY_PRIVATE_KEY
 };
+
+// Initialize connection
+initializeConnection().catch(console.error);
 
 // Get treasury keypair
 function getTreasuryKeypair() {

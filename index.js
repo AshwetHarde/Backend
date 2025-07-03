@@ -1,132 +1,131 @@
-const express = require("express");
-const cors = require("cors");
-const { Moralis } = require("moralis");
-const { Connection, PublicKey } = require("@solana/web3.js");
-const { getMint } = require("@solana/spl-token");
-require("dotenv").config();
-Moralis.start({ apiKey: process.env.MORALIS_API_KEY });
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import api from './server/secure-api.js';
+
+// Load environment variables
+dotenv.config();
+
+// ES modules compatibility
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+
+// CRITICAL: Strict port handling for Render
+if (!process.env.PORT) {
+  console.error('❌ Fatal: No PORT environment variable provided');
+  process.exit(1);
+}
+
+const PORT = parseInt(process.env.PORT, 10);
+if (isNaN(PORT)) {
+  console.error('❌ Fatal: PORT environment variable is not a valid number');
+  process.exit(1);
+}
+
+// Basic middleware
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Accept', 'Authorization'],
+  credentials: true
+}));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-async function fetchEvmToken(chain, address) {
-  const metaResp = await Moralis.EvmApi.token.getTokenMetadata({
-    chain,
-    address,
+// API routes
+app.use('/api', api);
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    port: PORT,
+    env: process.env.NODE_ENV
   });
-  const priceResp = await Moralis.EvmApi.token.getTokenPrice({
-    chain,
-    address,
-  });
-  const holdersResp = await Moralis.EvmApi.token.getTokenAddressHolders({
-    chain,
-    address,
-    limit: 10,
-  });
-
-  return {
-    meta: metaResp.toJSON(),
-    price: priceResp.toJSON(),
-    holders: holdersResp.toJSON(),
-  };
-}
-
-async function fetchSolToken(address) {
-  const rpcEndpoint = process.env.SOLANA_RPC_PRIMARY || "https://api.mainnet-beta.solana.com";
-  const connection = new Connection(rpcEndpoint);
-  const mintPubkey = new PublicKey(address);
-  const mintInfo = await getMint(connection, mintPubkey);
-
-  const supply = Number(mintInfo.supply) / 10 ** mintInfo.decimals;
-  const mintDisabled = mintInfo.mintAuthority === null;
-  const freezeDisabled = mintInfo.freezeAuthority === null;
-
-  const largest = await connection.getTokenLargestAccounts(mintPubkey);
-  const top10 = largest.value.slice(0, 10).map((acc) => ({
-    address: acc.address,
-    amount: Number(acc.amount) / 10 ** mintInfo.decimals,
-  }));
-
-  return {
-    supply,
-    decimals: mintInfo.decimals,
-    mintDisabled,
-    freezeDisabled,
-    top10,
-  };
-}
-
-function calculateRiskScore(data) {
-  let score = 0;
-  if (data.holders < 100) score += 30;
-  if (data.liquidityUsd < 50000) score += 30;
-  if (data.volumeUsd24h < 10000) score += 20;
-  const top1 = data.holdersDistribution[0]?.amount || 0;
-  if (top1 / data.totalSupply > 0.5) score += 20;
-  const sumTop10 = data.holdersDistribution
-    .slice(0, 10)
-    .reduce((sum, h) => sum + h.amount, 0);
-  if (sumTop10 / data.totalSupply > 0.7) score += 20;
-  return Math.min(score, 100);
-}
-
-app.get("/api/scan", async (req, res) => {
-  try {
-    const { chain, address } = req.query;
-    if (!chain || !address) {
-      return res.status(400).json({ error: "chain and address required" });
-    }
-
-    let raw;
-    if (chain === "sol") {
-      raw = await fetchSolToken(address);
-      raw.chain = "Solana";
-    } else {
-      const chainId = chain === "bsc" ? "0x38" : "0x1";
-      raw = await fetchEvmToken(chainId, address);
-      raw.chain = chain === "bsc" ? "BSC" : "Ethereum";
-    }
-
-    const scanData = {
-      totalSupply: Number(raw.meta.totalSupply) / 10 ** raw.meta.decimals,
-      holders: raw.holders.result?.length || raw.holders.total,
-      priceUsd: raw.price.usdPrice || raw.price.price,
-      liquidityUsd: raw.price.usdLiquidity,
-      volumeUsd24h: raw.price.usd24hVolume,
-      holdersDistribution: (raw.holders.result || raw.holders)
-        .slice(0, 10)
-        .map((h) => ({
-          address: h.address,
-          amount: Number(h.balance || h.amount) / 10 ** raw.meta.decimals,
-        })),
-    };
-    scanData.riskScore = calculateRiskScore(scanData);
-    scanData.riskCategory =
-      scanData.riskScore < 30
-        ? "Low"
-        : scanData.riskScore < 70
-        ? "Moderate"
-        : "High";
-
-    res.json({ success: true, data: scanData });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: error.message });
-  }
 });
 
-app.get("/health", (req, res) => res.send("OK"));
-
-app.get('/',(req,res)=>{
-  res.send('welcome')
-})
-
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  // Server started
-  console.log('server started');
-  
+// Welcome route
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Welcome to CoinGuard API',
+    version: '1.0.0',
+    status: 'online',
+    endpoints: {
+      health: '/health',
+      api: '/api/*'
+    }
+  });
 });
 
-module.exports = app;
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    error: {
+      message: err.message || 'Internal Server Error',
+      status: err.status || 500
+    }
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    error: {
+      message: 'Route not found',
+      status: 404
+    }
+  });
+});
+
+// Start server with strict error handling
+try {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log('----------------------------------------');
+    console.log(`✅ Server successfully started`);
+    console.log(`🚀 Running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log('----------------------------------------');
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(`❌ Fatal: Port ${PORT} is already in use`);
+      console.error('This is likely because another instance is already running');
+      process.exit(1);
+    }
+    console.error('❌ Fatal: Server error:', error.message);
+    process.exit(1);
+  });
+
+  // Graceful shutdown
+  const shutdown = () => {
+    console.log('\n🛑 Initiating graceful shutdown...');
+    server.close(() => {
+      console.log('✅ Server closed successfully');
+      process.exit(0);
+    });
+
+    // Force shutdown after 10 seconds
+    setTimeout(() => {
+      console.error('⚠️ Forced shutdown after timeout');
+      process.exit(1);
+    }, 10000);
+  };
+
+  // Handle shutdown signals
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+
+} catch (error) {
+  console.error('❌ Fatal: Failed to start server:', error.message);
+  process.exit(1);
+}
+
+export default app;

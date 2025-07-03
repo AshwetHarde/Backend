@@ -340,94 +340,103 @@ app.get('/api/presale/status', (req, res) => {
   }
 })
 
+// Get presale stats
+app.get('/api/presale/stats', async (req, res) => {
+  try {
+    const isActive = tokenService.isPresaleActive();
+    const now = Date.now();
+    const timeLeft = tokenService.TOKEN_CONFIG.PRESALE_END - now;
+    
+    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+
+    res.json({
+      active: isActive,
+      raised: 1200000,
+      target: 4000000,
+      price: 0.01,
+      participants: 1250,
+      timeLeft: {
+        days,
+        hours,
+        minutes,
+        seconds
+      }
+    });
+  } catch (error) {
+    console.error('Error getting presale stats:', error);
+    res.status(500).json({ error: 'Failed to get presale stats' });
+  }
+});
+
 // Get CGT balance
 app.get('/api/balance/:wallet', async (req, res) => {
   try {
-    const { wallet } = req.params
-    
-    if (!isValidSolanaAddress(wallet)) {
-      return res.status(400).json({ success: false, error: 'Invalid wallet address' })
+    const { wallet } = req.params;
+    if (!wallet) {
+      return res.status(400).json({ error: 'Wallet address is required' });
     }
-    
-    const balance = await tokenService.getCgtBalance(wallet)
-    res.json({ success: true, balance })
+
+    const balance = await tokenService.getCgtBalance(wallet);
+    res.json({ balance });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
+    console.error('Error getting balance:', error);
+    res.status(500).json({ error: 'Failed to get balance' });
   }
-})
+});
 
 // Create payment transaction
 app.post('/api/payment/create', async (req, res) => {
   try {
-    const { wallet, amount, tokenType } = req.body
+    const { wallet, amount, tokenType } = req.body;
     
-    if (!isValidSolanaAddress(wallet)) {
-      return res.status(400).json({ success: false, error: 'Invalid wallet address' })
+    if (!wallet || !amount || !tokenType) {
+      return res.status(400).json({ error: 'Missing required parameters' });
     }
-    
-    if (!tokenService.isPresaleActive()) {
-      return res.status(403).json({ success: false, error: 'Presale is not active' })
-    }
-    
-    let result
-    if (tokenType.toUpperCase() === 'SOL') {
-      result = await paymentService.createSolPayment(wallet, amount)
-    } else if (['USDT', 'USDC'].includes(tokenType.toUpperCase())) {
-      result = await paymentService.createSplTokenPayment(wallet, amount, tokenType)
-    } else {
-      return res.status(400).json({ success: false, error: 'Invalid token type' })
-    }
-    
-    res.json({ success: true, ...result })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
 
-// Verify payment and transfer CGT
+    const paymentData = await paymentService.createPayment(wallet, amount, tokenType);
+    res.json(paymentData);
+  } catch (error) {
+    console.error('Error creating payment:', error);
+    res.status(500).json({ error: 'Failed to create payment' });
+  }
+});
+
+// Verify payment
 app.post('/api/payment/verify', async (req, res) => {
   try {
-    const { signature, wallet, amount, tokenType } = req.body
+    const { signature, wallet, amount, tokenType } = req.body;
     
     if (!signature || !wallet || !amount || !tokenType) {
-      return res.status(400).json({ success: false, error: 'Missing required parameters' })
+      return res.status(400).json({ error: 'Missing required parameters' });
     }
-    
-    if (!isValidSolanaAddress(wallet)) {
-      return res.status(400).json({ success: false, error: 'Invalid wallet address' })
-    }
-    
-    // Verify the payment transaction
-    await paymentService.verifyTransaction(signature)
-    
-    // Calculate CGT amount
-    const cgtAmount = tokenService.calculateCgtAmount(amount, tokenType)
-    
-    // Transfer CGT tokens
-    const transferResult = await tokenService.transferCgtTokens(wallet, cgtAmount)
-    
-    res.json({ success: true, ...transferResult })
+
+    const verificationResult = await paymentService.verifyPayment(signature, wallet, amount, tokenType);
+    res.json(verificationResult);
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
+    console.error('Error verifying payment:', error);
+    res.status(500).json({ error: 'Failed to verify payment' });
   }
-})
+});
 
 // Get conversion rates
-app.get('/api/rates', (req, res) => {
+app.get('/api/rates', async (req, res) => {
   try {
     const rates = {
-      SOL: { 
-        rate: parseInt(process.env.VITE_SOL_TO_CGT_RATE || 7500),
+      SOL: {
+        rate: tokenService.TOKEN_CONFIG.SOL_TO_CGT_RATE,
         min: 0.1,
         max: 100
       },
       USDT: {
-        rate: parseInt(process.env.VITE_USDT_TO_CGT_RATE || 50),
+        rate: tokenService.TOKEN_CONFIG.USDT_TO_CGT_RATE,
         min: 10,
         max: 50000
       },
       USDC: {
-        rate: parseInt(process.env.VITE_USDC_TO_CGT_RATE || 50),
+        rate: tokenService.TOKEN_CONFIG.USDC_TO_CGT_RATE,
         min: 10,
         max: 50000
       }
@@ -435,35 +444,8 @@ app.get('/api/rates', (req, res) => {
     
     res.json(rates);
   } catch (error) {
-    console.error('Rates error:', error);
-    res.status(500).json({ error: 'Failed to get rates' });
-  }
-})
-
-// Get presale status
-app.get('/api/presale/stats', (req, res) => {
-  try {
-    const now = Date.now();
-    const start = parseInt(process.env.PRESALE_START);
-    const end = parseInt(process.env.PRESALE_END);
-    
-    const timeLeft = end - now;
-    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-    
-    res.json({
-      active: now >= start && now <= end,
-      raised: 1200000, // TODO: Implement actual raised amount tracking
-      target: 4000000,
-      price: 0.01,
-      participants: 1250, // TODO: Implement actual participant counting
-      timeLeft: { days, hours, minutes, seconds }
-    });
-  } catch (error) {
-    console.error('Presale stats error:', error);
-    res.status(500).json({ error: 'Failed to get presale stats' });
+    console.error('Error getting rates:', error);
+    res.status(500).json({ error: 'Failed to get conversion rates' });
   }
 });
 

@@ -1,8 +1,10 @@
 import { Connection, PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
 import { 
   getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
   createTransferInstruction,
-  TOKEN_PROGRAM_ID
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 import tokenService from './tokenService.js';
 
@@ -56,97 +58,152 @@ function validatePaymentAmount(amount, tokenType) {
   return true;
 }
 
-// Create SOL payment transaction
-export async function createSolPayment(fromWallet, solAmount) {
-  try {
-    validatePaymentAmount(solAmount, 'SOL');
-    
-    const fromPublicKey = new PublicKey(fromWallet);
-    const toPublicKey = new PublicKey(PAYMENT_CONFIG.RECEIVER_WALLET);
-    
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    
-    const transaction = new Transaction();
-    transaction.recentBlockhash = blockhash;
-    transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = fromPublicKey;
-    
-    transaction.add(
-      SystemProgram.transfer({
-        fromPubkey: fromPublicKey,
-        toPubkey: toPublicKey,
-        lamports: Math.floor(solAmount * 1e9)
-      })
-    );
-    
-    return {
-      transaction: transaction.serialize({ requireAllSignatures: false }),
-      expectedCgt: tokenService.calculateCgtAmount(solAmount, 'SOL')
-    };
-  } catch (error) {
-    throw new Error(`Failed to create SOL payment: ${error.message}`);
+// Get token mint address for payment token
+function getTokenMint(tokenType) {
+  switch (tokenType.toUpperCase()) {
+    case 'USDT':
+      return new PublicKey(tokenService.TOKEN_CONFIG.USDT_MINT);
+    case 'USDC':
+      return new PublicKey(tokenService.TOKEN_CONFIG.USDC_MINT);
+    default:
+      throw new Error('Invalid token type');
   }
 }
 
-// Create SPL token (USDT/USDC) payment transaction
-export async function createSplTokenPayment(fromWallet, amount, tokenType) {
+// Create payment transaction
+export async function createPayment(wallet, amount, tokenType) {
   try {
-    validatePaymentAmount(amount, tokenType);
+    if (!tokenService.isPresaleActive()) {
+      throw new Error('Presale is not active');
+    }
+
+    const userPublicKey = new PublicKey(wallet);
+    const receiverPublicKey = new PublicKey(tokenService.TOKEN_CONFIG.PAYMENT_RECEIVER);
     
-    const fromPublicKey = new PublicKey(fromWallet);
-    const toPublicKey = new PublicKey(PAYMENT_CONFIG.RECEIVER_WALLET);
+    // Calculate CGT amount
+    const cgtAmount = tokenService.calculateCgtAmount(amount, tokenType);
     
-    const mintAddress = tokenType === 'USDT' ? 
-      PAYMENT_CONFIG.USDT_MINT : 
-      PAYMENT_CONFIG.USDC_MINT;
+    // Create appropriate transaction based on token type
+    let transaction;
+    if (tokenType.toUpperCase() === 'SOL') {
+      transaction = await createSolPayment(userPublicKey, receiverPublicKey, amount);
+    } else {
+      transaction = await createSplTokenPayment(userPublicKey, receiverPublicKey, amount, tokenType);
+    }
     
-    const mint = new PublicKey(mintAddress);
-    const fromTokenAccount = await getAssociatedTokenAddress(mint, fromPublicKey);
-    const toTokenAccount = await getAssociatedTokenAddress(mint, toPublicKey);
+    // Convert transaction to base64 for transport
+    const serializedTransaction = Buffer.from(transaction.serialize()).toString('base64');
     
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    
-    const transaction = new Transaction();
-    transaction.recentBlockhash = blockhash;
-    transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = fromPublicKey;
-    
+    return {
+      transaction: serializedTransaction,
+      cgtAmount,
+      paymentAmount: amount,
+      paymentToken: tokenType
+    };
+  } catch (error) {
+    throw new Error(`Failed to create payment: ${error.message}`);
+  }
+}
+
+// Create SOL payment transaction
+async function createSolPayment(fromPubkey, toPubkey, amount) {
+  const connection = new Connection(tokenService.RPC_ENDPOINTS[0], 'confirmed');
+  const transaction = new Transaction();
+  
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey,
+      toPubkey,
+      lamports: amount * LAMPORTS_PER_SOL
+    })
+  );
+  
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = fromPubkey;
+  
+  return transaction;
+}
+
+// Create SPL token payment transaction
+async function createSplTokenPayment(fromPubkey, toPubkey, amount, tokenType) {
+  const connection = new Connection(tokenService.RPC_ENDPOINTS[0], 'confirmed');
+  const tokenMint = getTokenMint(tokenType);
+  
+  // Get token accounts
+  const fromTokenAccount = await getAssociatedTokenAddress(tokenMint, fromPubkey);
+  const toTokenAccount = await getAssociatedTokenAddress(tokenMint, toPubkey);
+  
+  const transaction = new Transaction();
+  
+  // Create receiver's token account if it doesn't exist
+  try {
+    await connection.getAccountInfo(toTokenAccount);
+  } catch {
     transaction.add(
-      createTransferInstruction(
-        fromTokenAccount,
+      createAssociatedTokenAccountInstruction(
+        fromPubkey,
         toTokenAccount,
-        fromPublicKey,
-        Math.floor(amount * 1e6), // USDT/USDC have 6 decimals
-        [],
-        TOKEN_PROGRAM_ID
+        toPubkey,
+        tokenMint,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
       )
     );
-    
-    return {
-      transaction: transaction.serialize({ requireAllSignatures: false }),
-      expectedCgt: tokenService.calculateCgtAmount(amount, tokenType)
-    };
-  } catch (error) {
-    throw new Error(`Failed to create ${tokenType} payment: ${error.message}`);
   }
+  
+  // Add transfer instruction
+  const decimals = tokenType.toUpperCase() === 'USDT' ? 6 : 6; // Both USDT and USDC use 6 decimals
+  const tokenAmount = Math.floor(amount * Math.pow(10, decimals));
+  
+  transaction.add(
+    createTransferInstruction(
+      fromTokenAccount,
+      toTokenAccount,
+      fromPubkey,
+      tokenAmount,
+      [],
+      TOKEN_PROGRAM_ID
+    )
+  );
+  
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = fromPubkey;
+  
+  return transaction;
 }
 
-// Verify transaction
-export async function verifyTransaction(signature) {
+// Verify payment transaction
+export async function verifyPayment(signature, wallet, amount, tokenType) {
   try {
-    const result = await connection.confirmTransaction(signature, 'confirmed');
-    if (result.value.err) {
-      throw new Error('Transaction failed');
+    const connection = new Connection(tokenService.RPC_ENDPOINTS[0], 'confirmed');
+    
+    // Wait for transaction confirmation
+    const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+    if (!confirmation?.value?.err) {
+      // Calculate CGT amount to transfer
+      const cgtAmount = tokenService.calculateCgtAmount(amount, tokenType);
+      
+      // Transfer CGT tokens
+      const transferResult = await tokenService.transferCgtTokens(wallet, cgtAmount);
+      
+      return {
+        success: true,
+        signature: transferResult.signature,
+        cgtAmount,
+        recipient: wallet
+      };
     }
-    return true;
+    
+    throw new Error('Transaction verification failed');
   } catch (error) {
-    throw new Error(`Transaction verification failed: ${error.message}`);
+    throw new Error(`Payment verification failed: ${error.message}`);
   }
 }
 
 export default {
-  createSolPayment,
-  createSplTokenPayment,
-  verifyTransaction,
+  createPayment,
+  verifyPayment,
   PAYMENT_CONFIG
 }; 
