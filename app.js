@@ -16,8 +16,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Let Render assign the port
-const PORT = process.env.PORT || 10000;
+// CRITICAL: Use only Render's port assignment
+const PORT = process.env.PORT;
+if (!PORT) {
+  console.error('No PORT environment variable set');
+  process.exit(1);
+}
 
 // Basic middleware
 app.use(cors());
@@ -86,7 +90,37 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
+// Create server with error handling
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log('----------------------------------------');
   console.log(`🚀 Server running on port ${PORT}`);
-}); 
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log('----------------------------------------');
+}).on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Fatal: Port ${PORT} is already in use`);
+    console.error('This is likely because another instance is already running');
+    process.exit(1);
+  } else {
+    console.error('❌ Fatal: Server error:', error);
+    process.exit(1);
+  }
+});
+
+// Graceful shutdown
+const shutdown = () => {
+  console.log('\n🛑 Shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('⚠️ Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown); 
