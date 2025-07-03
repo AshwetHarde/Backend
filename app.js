@@ -86,6 +86,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
+app.get('/',(req,res)=>{
+  res.send('welcome')
+})
+
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
