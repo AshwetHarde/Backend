@@ -99,46 +99,90 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// Start server with strict error handling
-try {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('----------------------------------------');
-    console.log(`✅ Server successfully started`);
-    console.log(`🚀 Running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log('----------------------------------------');
-  });
-
-  server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-      console.error(`❌ Fatal: Port ${PORT} is already in use`);
-      console.error('This is likely because another instance is already running');
-      process.exit(1);
-    }
-    console.error('❌ Fatal: Server error:', error.message);
-    process.exit(1);
-  });
-
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log('\n🛑 Initiating graceful shutdown...');
-    server.close(() => {
-      console.log('✅ Server closed successfully');
-      process.exit(0);
+// Start server with strict error handling and retry logic
+const startServer = async (retryCount = 0) => {
+  try {
+    // Check if port is available
+    const net = await import('net');
+    const tester = new net.Socket();
+    
+    await new Promise((resolve, reject) => {
+      tester.once('error', (err) => {
+        if (err.code === 'ECONNREFUSED') {
+          // Port is available
+          resolve();
+        } else {
+          reject(err);
+        }
+      });
+      
+      tester.once('connect', () => {
+        tester.end();
+        reject(new Error('Port is in use'));
+      });
+      
+      tester.connect({ port: PORT, host: '0.0.0.0' });
     });
 
-    // Force shutdown after 10 seconds
-    setTimeout(() => {
-      console.error('⚠️ Forced shutdown after timeout');
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log('----------------------------------------');
+      console.log(`✅ Server successfully started`);
+      console.log(`🚀 Running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log('----------------------------------------');
+    });
+
+    server.on('error', async (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`);
+        if (retryCount < 3) {
+          console.log(`⏳ Waiting 10 seconds before retry attempt ${retryCount + 1}/3...`);
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          await startServer(retryCount + 1);
+        } else {
+          console.error('❌ Fatal: Maximum retry attempts reached');
+          process.exit(1);
+        }
+      } else {
+        console.error('❌ Fatal: Server error:', error.message);
+        process.exit(1);
+      }
+    });
+
+    // Graceful shutdown
+    const shutdown = () => {
+      console.log('\n🛑 Initiating graceful shutdown...');
+      server.close(() => {
+        console.log('✅ Server closed successfully');
+        process.exit(0);
+      });
+
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        console.error('⚠️ Forced shutdown after timeout');
+        process.exit(1);
+      }, 10000);
+    };
+
+    // Handle shutdown signals
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+
+  } catch (error) {
+    if (retryCount < 3) {
+      console.error(`❌ Failed to start server: ${error.message}`);
+      console.log(`⏳ Waiting 10 seconds before retry attempt ${retryCount + 1}/3...`);
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      await startServer(retryCount + 1);
+    } else {
+      console.error('❌ Fatal: Failed to start server after maximum retries:', error.message);
       process.exit(1);
-    }, 10000);
-  };
+    }
+  }
+};
 
-  // Handle shutdown signals
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-
-} catch (error) {
-  console.error('❌ Fatal: Failed to start server:', error.message);
+// Start the server
+startServer().catch(error => {
+  console.error('❌ Fatal: Unhandled error during server startup:', error.message);
   process.exit(1);
-} 
+}); 
