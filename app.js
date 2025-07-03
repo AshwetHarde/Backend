@@ -15,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 const HOST = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
 
 // Parse allowed origins from env
@@ -127,7 +127,7 @@ app.get('*', (req, res) => {
   }
 });
 
-// Error handling middleware
+// Simple error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ 
@@ -138,67 +138,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Function to start server
-function startServer(port) {
-  return new Promise((resolve, reject) => {
-    try {
-      const server = app.listen(port, HOST, () => {
-        console.log(`🚀 CoinGuard Backend Server running on http://${HOST}:${port}`);
-        console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-        console.log(`🔒 Allowed Origins: ${ALLOWED_ORIGINS.join(', ')}`);
-        console.log('\n📡 Available endpoints:');
-        console.log(' Presale statistics');
-        console.log('   GET  /api/leaderboard - Top investors');
-        console.log('   POST /api/upload - File upload');
-        resolve(server);
-      });
-
-      server.on('error', (error) => {
-        if (error.code === 'EADDRINUSE') {
-          console.log(`⚠️ Port ${port} is busy, trying ${port + 1}...`);
-          startServer(port + 1).then(resolve).catch(reject);
-        } else {
-          console.error('Server error:', error);
-          reject(error);
-        }
-      });
-
-      // Store server instance for graceful shutdown
-      global.server = server;
-    } catch (error) {
-      console.error('Failed to start server:', error);
-      reject(error);
-    }
-  });
-}
-
-// Graceful shutdown handling
-process.on('SIGTERM', () => {
-  console.log('Received SIGTERM signal. Shutting down gracefully...');
-  if (global.server) {
-    global.server.close(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
-  } else {
-    process.exit(0);
-  }
-});
-
-process.on('SIGINT', () => {
-  console.log('Received SIGINT signal. Shutting down gracefully...');
-  if (global.server) {
-    global.server.close(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
-  } else {
-    process.exit(0);
-  }
-});
-
 // Start the server
-startServer(PORT).catch((error) => {
-  console.error('Failed to start server:', error);
-  process.exit(1);
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔒 Allowed Origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log('\n📡 Available endpoints:');
+  console.log(' Presale statistics');
+  console.log('   GET  /api/leaderboard - Top investors');
+  console.log('   POST /api/upload - File upload');
 }); 
