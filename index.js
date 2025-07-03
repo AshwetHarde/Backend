@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import api from './server/secure-api.js';
+import app from './app.js';
+import tokenService from './server/services/tokenService.js';
 
 // Load environment variables
 dotenv.config();
@@ -12,21 +14,34 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+const PORT = process.env.PORT || 3001;
 
-// CRITICAL: Strict port handling for Render
-if (!process.env.PORT) {
-  console.error('❌ Fatal: No PORT environment variable provided');
-  process.exit(1);
+// Initialize services
+async function initializeServer() {
+  try {
+    // Initialize token service (RPC connection, etc.)
+    await tokenService.initializeConnection();
+    
+    // Start server
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log('✅ Token service initialized');
+      console.log(`💫 CGT Mint: ${process.env.CGT_MINT_ADDRESS}`);
+      console.log(`🏦 Payment Receiver: ${process.env.PAYMENT_RECEIVER_WALLET}`);
+      console.log(`⏰ Presale Start: ${new Date(tokenService.TOKEN_CONFIG.PRESALE_START).toLocaleString()}`);
+      console.log(`⏰ Presale End: ${new Date(tokenService.TOKEN_CONFIG.PRESALE_END).toLocaleString()}`);
+    });
+  } catch (error) {
+    console.error('Failed to initialize server:', error);
+    process.exit(1);
+  }
 }
 
-const PORT = parseInt(process.env.PORT, 10);
-if (isNaN(PORT)) {
-  console.error('❌ Fatal: PORT environment variable is not a valid number');
-  process.exit(1);
-}
+// Start server with initialization
+initializeServer();
 
 // Basic middleware
+const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -84,48 +99,23 @@ app.use((req, res) => {
   });
 });
 
-// Start server with strict error handling
-try {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log('----------------------------------------');
-    console.log(`✅ Server successfully started`);
-    console.log(`🚀 Running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log('----------------------------------------');
+// Graceful shutdown
+const shutdown = () => {
+  console.log('\n🛑 Initiating graceful shutdown...');
+  app.close(() => {
+    console.log('✅ Server closed successfully');
+    process.exit(0);
   });
 
-  server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-      console.error(`❌ Fatal: Port ${PORT} is already in use`);
-      console.error('This is likely because another instance is already running');
-      process.exit(1);
-    }
-    console.error('❌ Fatal: Server error:', error.message);
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('⚠️ Forced shutdown after timeout');
     process.exit(1);
-  });
+  }, 10000);
+};
 
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log('\n🛑 Initiating graceful shutdown...');
-    server.close(() => {
-      console.log('✅ Server closed successfully');
-      process.exit(0);
-    });
-
-    // Force shutdown after 10 seconds
-    setTimeout(() => {
-      console.error('⚠️ Forced shutdown after timeout');
-      process.exit(1);
-    }, 10000);
-  };
-
-  // Handle shutdown signals
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-
-} catch (error) {
-  console.error('❌ Fatal: Failed to start server:', error.message);
-  process.exit(1);
-}
+// Handle shutdown signals
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 export default app;

@@ -17,24 +17,44 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 // Let Render assign the port
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3001;
+
+// CORS configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['https://app.coinguard.ai', 'https://coinguard.ai', 'http://localhost:5173'];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost:')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 
 // Basic middleware
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // API routes
-app.use(api);
+app.use('/api', api);
 
-// Health check for Render
+// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// Basic routes
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: Date.now() });
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'CGT Token Presale API',
+    status: 'running',
+    timestamp: Date.now()
+  });
 });
 
 app.get('/api/presale/stats', (req, res) => {
@@ -82,8 +102,11 @@ app.get('/api/leaderboard', (req, res) => {
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Internal Server Error' });
+  console.error('Error:', err.message);
+  res.status(err.status || 500).json({ 
+    error: err.message || 'Internal Server Error',
+    status: false
+  });
 });
 
 app.get('/',(req,res)=>{

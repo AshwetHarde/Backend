@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js'
+import { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { 
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -343,28 +343,8 @@ app.get('/api/presale/status', (req, res) => {
 // Get presale stats
 app.get('/api/presale/stats', async (req, res) => {
   try {
-    const isActive = tokenService.isPresaleActive();
-    const now = Date.now();
-    const timeLeft = tokenService.TOKEN_CONFIG.PRESALE_END - now;
-    
-    const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-
-    res.json({
-      active: isActive,
-      raised: 1200000,
-      target: 4000000,
-      price: 0.01,
-      participants: 1250,
-      timeLeft: {
-        days,
-        hours,
-        minutes,
-        seconds
-      }
-    });
+    const stats = await tokenService.getPresaleStats();
+    res.json(stats);
   } catch (error) {
     console.error('Error getting presale stats:', error);
     res.status(500).json({ error: 'Failed to get presale stats' });
@@ -376,9 +356,8 @@ app.get('/api/balance/:wallet', async (req, res) => {
   try {
     const { wallet } = req.params;
     if (!wallet) {
-      return res.status(400).json({ error: 'Wallet address is required' });
+      return res.status(400).json({ error: 'Wallet address required' });
     }
-
     const balance = await tokenService.getCgtBalance(wallet);
     res.json({ balance });
   } catch (error) {
@@ -392,32 +371,41 @@ app.post('/api/payment/create', async (req, res) => {
   try {
     const { wallet, amount, tokenType } = req.body;
     
+    // Validate inputs
     if (!wallet || !amount || !tokenType) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
-
-    const paymentData = await paymentService.createPayment(wallet, amount, tokenType);
-    res.json(paymentData);
+    
+    // Validate presale status
+    if (!tokenService.isPresaleActive()) {
+      return res.status(403).json({ error: 'Presale is not active' });
+    }
+    
+    // Create payment transaction
+    const payment = await paymentService.createPayment(wallet, amount, tokenType);
+    res.json(payment);
   } catch (error) {
     console.error('Error creating payment:', error);
-    res.status(500).json({ error: 'Failed to create payment' });
+    res.status(500).json({ error: error.message || 'Failed to create payment' });
   }
 });
 
-// Verify payment
+// Verify payment and send CGT
 app.post('/api/payment/verify', async (req, res) => {
   try {
     const { signature, wallet, amount, tokenType } = req.body;
     
+    // Validate inputs
     if (!signature || !wallet || !amount || !tokenType) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
-
-    const verificationResult = await paymentService.verifyPayment(signature, wallet, amount, tokenType);
-    res.json(verificationResult);
+    
+    // Verify payment and transfer CGT
+    const result = await paymentService.verifyPayment(signature, wallet, amount, tokenType);
+    res.json(result);
   } catch (error) {
     console.error('Error verifying payment:', error);
-    res.status(500).json({ error: 'Failed to verify payment' });
+    res.status(500).json({ error: error.message || 'Failed to verify payment' });
   }
 });
 
@@ -425,7 +413,7 @@ app.post('/api/payment/verify', async (req, res) => {
 app.get('/api/rates', async (req, res) => {
   try {
     const rates = {
-      SOL: {
+      SOL: { 
         rate: tokenService.TOKEN_CONFIG.SOL_TO_CGT_RATE,
         min: 0.1,
         max: 100
@@ -441,11 +429,10 @@ app.get('/api/rates', async (req, res) => {
         max: 50000
       }
     };
-    
     res.json(rates);
   } catch (error) {
     console.error('Error getting rates:', error);
-    res.status(500).json({ error: 'Failed to get conversion rates' });
+    res.status(500).json({ error: 'Failed to get rates' });
   }
 });
 
