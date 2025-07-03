@@ -4,8 +4,8 @@ services:
     env: node
     region: singapore
     plan: free
-    buildCommand: npm install
-    startCommand: node app.js
+    buildCommand: cd backend && npm install --production
+    startCommand: cd backend && NODE_ENV=production node app.js
     envVars:
       - key: NODE_ENV
         value: production

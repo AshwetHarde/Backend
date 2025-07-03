@@ -16,17 +16,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// CRITICAL: Strict port handling for Render
-if (!process.env.PORT) {
-  console.error('❌ Fatal: No PORT environment variable provided by Render');
-  process.exit(1);
-}
-
-const PORT = parseInt(process.env.PORT, 10);
-if (isNaN(PORT)) {
-  console.error('❌ Fatal: PORT environment variable is not a valid number');
-  process.exit(1);
-}
+// Let Render assign the port
+const PORT = process.env.PORT || 10000;
 
 // Basic middleware
 app.use(cors());
@@ -36,13 +27,9 @@ app.use(express.urlencoded({ extended: true }));
 // API routes
 app.use(api);
 
-// Health check endpoint required by Render
+// Health check for Render
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'healthy',
-    port: PORT,
-    env: process.env.NODE_ENV
-  });
+  res.json({ status: 'ok' });
 });
 
 // Basic routes
@@ -99,90 +86,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// Start server with strict error handling and retry logic
-const startServer = async (retryCount = 0) => {
-  try {
-    // Check if port is available
-    const net = await import('net');
-    const tester = new net.Socket();
-    
-    await new Promise((resolve, reject) => {
-      tester.once('error', (err) => {
-        if (err.code === 'ECONNREFUSED') {
-          // Port is available
-          resolve();
-        } else {
-          reject(err);
-        }
-      });
-      
-      tester.once('connect', () => {
-        tester.end();
-        reject(new Error('Port is in use'));
-      });
-      
-      tester.connect({ port: PORT, host: '0.0.0.0' });
-    });
-
-    const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log('----------------------------------------');
-      console.log(`✅ Server successfully started`);
-      console.log(`🚀 Running on port ${PORT}`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log('----------------------------------------');
-    });
-
-    server.on('error', async (error) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`❌ Port ${PORT} is already in use`);
-        if (retryCount < 3) {
-          console.log(`⏳ Waiting 10 seconds before retry attempt ${retryCount + 1}/3...`);
-          await new Promise(resolve => setTimeout(resolve, 10000));
-          await startServer(retryCount + 1);
-        } else {
-          console.error('❌ Fatal: Maximum retry attempts reached');
-          process.exit(1);
-        }
-      } else {
-        console.error('❌ Fatal: Server error:', error.message);
-        process.exit(1);
-      }
-    });
-
-    // Graceful shutdown
-    const shutdown = () => {
-      console.log('\n🛑 Initiating graceful shutdown...');
-      server.close(() => {
-        console.log('✅ Server closed successfully');
-        process.exit(0);
-      });
-
-      // Force shutdown after 10 seconds
-      setTimeout(() => {
-        console.error('⚠️ Forced shutdown after timeout');
-        process.exit(1);
-      }, 10000);
-    };
-
-    // Handle shutdown signals
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
-
-  } catch (error) {
-    if (retryCount < 3) {
-      console.error(`❌ Failed to start server: ${error.message}`);
-      console.log(`⏳ Waiting 10 seconds before retry attempt ${retryCount + 1}/3...`);
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      await startServer(retryCount + 1);
-    } else {
-      console.error('❌ Fatal: Failed to start server after maximum retries:', error.message);
-      process.exit(1);
-    }
-  }
-};
-
-// Start the server
-startServer().catch(error => {
-  console.error('❌ Fatal: Unhandled error during server startup:', error.message);
-  process.exit(1);
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 }); 

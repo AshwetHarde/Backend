@@ -1,10 +1,9 @@
-require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { Moralis } = require("moralis");
 const { Connection, PublicKey } = require("@solana/web3.js");
 const { getMint } = require("@solana/spl-token");
-
+require("dotenv").config();
 Moralis.start({ apiKey: process.env.MORALIS_API_KEY });
 
 const app = express();
@@ -119,9 +118,15 @@ app.get("/api/scan", async (req, res) => {
 
 app.get("/health", (req, res) => res.send("OK"));
 
+app.get('/',(req,res)=>{
+  res.send('welcome')
+})
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   // Server started
+  console.log('server started');
+  
 });
 
 module.exports = app;
