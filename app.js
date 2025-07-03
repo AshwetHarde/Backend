@@ -16,8 +16,8 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Port configuration - MUST use Render's PORT in production
-const PORT = process.env.PORT || 3001;
+// Dynamic port assignment - use Render's PORT or fallback to 10000
+const PORT = process.env.PORT || 10000;
 
 // Parse allowed origins from env
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? 
@@ -139,51 +139,15 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start the server
-try {
-  const server = app.listen(PORT, () => {
-    console.log('----------------------------------------');
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔒 Allowed Origins: ${ALLOWED_ORIGINS.join(', ')}`);
-    console.log('\n📡 Available endpoints:');
-    console.log(' Presale statistics');
-    console.log('   GET  /api/leaderboard - Top investors');
-    console.log('   POST /api/upload - File upload');
-    console.log('----------------------------------------');
-  });
-
-  // Handle server errors
-  server.on('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-      console.error(`❌ Error: Port ${PORT} is already in use`);
-      console.error('This might be because another instance is already running');
-      process.exit(1);
-    } else {
-      console.error('❌ Server error:', error);
-      process.exit(1);
-    }
-  });
-
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log('\n🛑 Shutting down gracefully...');
-    server.close(() => {
-      console.log('✅ Server closed successfully');
-      process.exit(0);
-    });
-
-    // Force shutdown after 10 seconds if graceful shutdown fails
-    setTimeout(() => {
-      console.error('⚠️ Could not close connections in time, forcefully shutting down');
-      process.exit(1);
-    }, 10000);
-  };
-
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-
-} catch (error) {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
-} 
+// Start the server with dynamic port
+app.listen(PORT, () => {
+  console.log('----------------------------------------');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔒 Allowed Origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log('\n📡 Available endpoints:');
+  console.log(' Presale statistics');
+  console.log('   GET  /api/leaderboard - Top investors');
+  console.log('   POST /api/upload - File upload');
+  console.log('----------------------------------------');
+}); 
