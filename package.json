@@ -4,7 +4,8 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "set PORT=3002 && node app.js",
+    "dev": "nodemon app.js"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.13",
@@ -15,7 +16,8 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.5.1",
     "helmet": "^8.1.0",
-    "multer": "^2.0.1"
+    "multer": "^2.0.1",
+    "nodemon": "^3.1.10"
   },
   "engines": {
     "node": ">=18.0.0"
