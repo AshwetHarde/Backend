@@ -16,17 +16,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Dynamic port assignment - use Render's PORT or fallback to 10000
-const PORT = process.env.PORT || 10000;
+// Let Render assign the port
+const PORT = process.env.PORT || 8080;
 
-// Parse allowed origins from env
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? 
-  process.env.ALLOWED_ORIGINS.split(',') : 
-  ['https://app.coinguard.ai', 'https://coinguard.ai', 'http://localhost:5173'];
-
-// Configure CORS with environment variables
+// Configure CORS for production
 app.use(cors({
-  origin: ALLOWED_ORIGINS,
+  origin: ['https://app.coinguard.ai', 'https://coinguard.ai'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -133,21 +128,17 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ 
     success: false, 
-    error: process.env.NODE_ENV === 'production' ? 
-      'Internal server error' : 
-      err.message 
+    error: 'Internal server error'
   });
 });
 
-// Start the server with dynamic port
-app.listen(PORT, () => {
-  console.log('----------------------------------------');
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+// Start server - bind to 0.0.0.0 for Render
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔒 Allowed Origins: ${ALLOWED_ORIGINS.join(', ')}`);
-  console.log('\n📡 Available endpoints:');
-  console.log(' Presale statistics');
-  console.log('   GET  /api/leaderboard - Top investors');
-  console.log('   POST /api/upload - File upload');
-  console.log('----------------------------------------');
+  console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
 }); 
